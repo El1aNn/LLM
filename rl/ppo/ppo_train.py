@@ -355,9 +355,14 @@ def train_step(experience, steps):
             sequences,
             attention_mask=attention_mask).logits
     
-    log_probs = F.log_softmax(logits[:, :-1, :], dim=-1)
-    log_probs_labels = log_probs.gather(dim=-1, index=sequences[:, 1:].unsqueeze(-1))
-    action_log_probs = log_probs_labels.squeeze(-1)[:, -num_actions:]
+    log_probs = F.log_softmax(logits[:, :-1, :], dim=-1) # shape: [batch_size, seq_len, vocab_size]
+    log_probs_labels = log_probs.gather(dim=-1, index=sequences[:, 1:].unsqueeze(-1)) # shape: [batch_size, seq_len, 1]
+    action_log_probs = log_probs_labels.squeeze(-1)[:, -num_actions:] # shape: [batch_size, num_actions]
+    # 计算kl散度
+    # kl = compute_approx_kl(
+    #         action_log_probs,
+    #         old_action_log_probs,
+    #         action_mask=action_mask).to(device)
   
 
     
