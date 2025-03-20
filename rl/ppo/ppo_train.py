@@ -176,8 +176,8 @@ def get_advantages_and_returns(
         lastgaelam = delta + gamma * lambd * lastgaelam
         advantages_reversed.append(lastgaelam)
     advantages = torch.stack(advantages_reversed[::-1], dim=1)
-    returns = advantages + values
-    return advantages.detach(), returns
+    returns = advantages + values # re
+    return advantages.detach(), returns # detach() 从计算图中分离出来，避免梯度传播
 
 def generate_samples(prompts, model, max_length, max_new_tokens, n_samples_per_prompt, micro_rollout_batch_size):
     samples_list = []
@@ -216,7 +216,15 @@ def generate_samples(prompts, model, max_length, max_new_tokens, n_samples_per_p
 
 
 def compute_rewards(kl, r, action_mask, kl_ctl, clip_reward_value):
-
+        """
+        输入：  kl: KL散度估计
+           r: 奖励模型的奖励值
+           action_mask: 动作掩码，用于确定有效动作的位置
+           kl_ctl: KL控制参数
+           clip_reward_value: 奖励值的裁剪范围
+        输出：  rewards: 计算得到的奖励值
+        
+        """
         kl_divergence_estimate = -kl_ctl * kl
         rewards = kl_divergence_estimate
 
@@ -229,7 +237,7 @@ def compute_rewards(kl, r, action_mask, kl_ctl, clip_reward_value):
                                   clip_reward_value)
         batch_size = r.size(0)
         for j in range(batch_size):
-            rewards[j, :ends[j]][-1] += reward_clip[j, 0]
+            rewards[j, :ends[j]][-1] += reward_clip[j, 0] 
 
         return rewards
 
@@ -249,10 +257,10 @@ def generate_experiences(samples_list):
         num_actions = samples.num_actions
         with torch.no_grad():
             # 计算策略模型输出token的概率
-            output = actor_model(seqs, attention_mask=attention_mask)
-            logits = output.logits
-            log_probs = F.log_softmax(logits[:, :-1, :], dim=-1)
-            log_probs_labels = log_probs.gather(dim=-1, index=seqs[:, 1:].unsqueeze(-1))
+            output = actor_model(seqs, attention_mask=attention_mask)  # shape of output: (batch_size, seq_len, vocab_size)
+            logits = output.logits 
+            log_probs = F.log_softmax(logits[:, :-1, :], dim=-1) # shape of log_probs: (batch_size, seq_len-1, vocab_size)
+            log_probs_labels = log_probs.gather(dim=-1, index=seqs[:, 1:].unsqueeze(-1)) # shape of log_probs_labels: (batch_size, seq_len-1， 1)
             action_log_probs = log_probs_labels.squeeze(-1)[:, -num_actions:]
             #计算参考模型输出token的概率
             ref_output = ref_model(seqs, attention_mask=attention_mask)
