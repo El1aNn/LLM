@@ -658,11 +658,10 @@ class VLMGRPOTrainer(Trainer):
         # Compute the rewards
         # No need to duplicate prompts as we're not generating multiple completions per prompt
 
-        rewards_per_func = torch.zeros(
-            len(prompts), len(self.reward_funcs), device=device)
+        rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
         for i, (reward_func, reward_processing_class) in enumerate(
             zip(self.reward_funcs, self.reward_processing_classes)
-        ):
+        ): # 检查reward_func是否为PreTrainedModel，如果是，则使用reward_func进行推理
             if isinstance(reward_func, PreTrainedModel):
                 if is_conversational(inputs[0]):
                     messages = [{"messages": p + c}
@@ -687,31 +686,25 @@ class VLMGRPOTrainer(Trainer):
                         # No need to duplicate prompts as we're not generating multiple completions per prompt
                         # reward_kwargs[key].extend([example[key]] * self.num_generations)
                         reward_kwargs[key].extend([example[key]])
-                output_reward_func = reward_func(
-                    prompts=prompts, completions=completions, **reward_kwargs)
-                rewards_per_func[:, i] = torch.tensor(
-                    output_reward_func, dtype=torch.float32, device=device)
+                output_reward_func = reward_func(prompts=prompts, completions=completions, **reward_kwargs)
+                rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
 
         # Gather rewards across processes
         rewards_per_func = self.accelerator.gather(rewards_per_func)
 
         # Sum the rewards from all reward functions
         rewards = rewards_per_func.sum(dim=1)
-
+        
         # Compute grouped-wise rewards
         # Each group consists of num_generations completions for the same prompt
-        mean_grouped_rewards = rewards.view(-1,
-                                            self.num_generations).mean(dim=1)
+        mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
         std_grouped_rewards = rewards.view(-1, self.num_generations).std(dim=1)
-
+        
         # Normalize the rewards to compute the advantages
-        mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(
-            self.num_generations, dim=0)
-        std_grouped_rewards = std_grouped_rewards.repeat_interleave(
-            self.num_generations, dim=0)
-        advantages = (rewards - mean_grouped_rewards) / \
-            (std_grouped_rewards + 1e-4)
-
+        mean_grouped_rewards = mean_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
+        std_grouped_rewards = std_grouped_rewards.repeat_interleave(self.num_generations, dim=0)
+        advantages = (rewards - mean_grouped_rewards) / (std_grouped_rewards + 1e-4)
+        
         # Get only the local slice of advantages
         process_slice = slice(
             self.accelerator.process_index * len(prompts),
@@ -811,8 +804,7 @@ class VLMGRPOTrainer(Trainer):
                 self.accelerator.gather_for_metrics(mean_kl).mean().item())
 
         # Compute final loss
-        loss = ((per_token_loss * completion_mask).sum(dim=1) /
-                completion_mask.sum(dim=1)).mean()
+        loss = ((per_token_loss * completion_mask).sum(dim=1) / completion_mask.sum(dim=1)).mean()
 
         # Log clip ratio
         is_clipped = (per_token_loss1 < per_token_loss2).float()
